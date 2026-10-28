@@ -1,0 +1,6 @@
+interface:
+  display_name: "report"
+  short_description: "手动启用当前会话的实验记录，集中查看进度、结果、设置与实现"
+  default_prompt: "使用 $report 初始化当前项目的实验报告，并在当前会话持续记录实验进度、设置、实现和结果。"
+policy:
+  allow_implicit_invocation: false

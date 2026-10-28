@@ -1,0 +1,396 @@
+{
+  "stage": {
+    "id": "01-temporal",
+    "title": "时序一致性探索",
+    "question": "加入时序约束后，视频一致性与画面质量如何变化？",
+    "state": "active",
+    "demo": true,
+    "baseline": "exp-001",
+    "summary": "权重 0.1 提升一致性，画面质量基本持平；更高权重仍在评估。",
+    "analysis_at": "2026-10-28T14:30:00+08:00",
+    "settings_summary": "16 帧 · 256 × 256 · 10,000 steps · 相同种子",
+    "common_config": {
+      "model": "demo-video-small",
+      "dataset": "示例验证集 / 64 条视频",
+      "frames": 16,
+      "resolution": "256 × 256",
+      "seed": 42,
+      "steps": 10000,
+      "micro_batch": 4,
+      "gradient_accumulation": 2,
+      "world_size": 1,
+      "global_batch": 8,
+      "learning_rate": 0.0001
+    },
+    "metrics": [
+      {
+        "key": "consistency",
+        "label": "一致性",
+        "direction": "up",
+        "digits": 3
+      },
+      {
+        "key": "quality",
+        "label": "画面质量",
+        "direction": "up",
+        "digits": 1
+      }
+    ],
+    "media": []
+  },
+  "notes": "## 发现与解释\n\n在这组**示例数据**中，权重 `0.1` 的一致性从 `0.781` 提升到 `0.824`，画面质量从 `72.4` 变化到 `72.1`。这一结果支持继续探索较小权重的时序约束。\n\n权重 `0.2` 的实验正在运行，当前进度与最新评估见上方实验表。当前评估值用于观察趋势，最终比较在训练结束、完成统一评估后进行。\n\n## 下一步\n\n- 完成权重 `0.2` 的最终评估，比较一致性收益与画面质量变化。\n- 运行关闭状态传递的消融实验，定位增益来自哪一项实现。\n- 对候选设置增加随机种子复跑，观察结果的稳定性。\n",
+  "runs": [
+    {
+      "id": "exp-001",
+      "name": "Baseline",
+      "changes": "默认配置 · 时序权重 0",
+      "status": "completed",
+      "progress": {
+        "step": 10000,
+        "total": 10000
+      },
+      "metrics": {
+        "consistency": 0.781,
+        "quality": 72.4
+      },
+      "history": [
+        {
+          "step": 0,
+          "consistency": 0.683
+        },
+        {
+          "step": 2000,
+          "consistency": 0.728
+        },
+        {
+          "step": 4000,
+          "consistency": 0.754
+        },
+        {
+          "step": 6000,
+          "consistency": 0.767
+        },
+        {
+          "step": 8000,
+          "consistency": 0.776
+        },
+        {
+          "step": 10000,
+          "consistency": 0.781
+        }
+      ],
+      "config": {
+        "model": "demo-video-small",
+        "dataset": "示例验证集 / 64 条视频",
+        "frames": 16,
+        "resolution": "256 × 256",
+        "seed": 42,
+        "steps": 10000,
+        "micro_batch": 4,
+        "gradient_accumulation": 2,
+        "world_size": 1,
+        "global_batch": 8,
+        "learning_rate": 0.0001,
+        "temporal_weight": 0,
+        "state_transport": true
+      },
+      "command": "python train.py --config configs/exp-001.yaml --output runs/exp-001",
+      "implementation": [
+        {
+          "file": "training/losses.py:temporal_loss",
+          "description": "示例实现：在基础扩散损失中加入相邻帧时序一致性项。",
+          "code": "loss = diffusion_loss + 0 * temporal_loss"
+        },
+        {
+          "file": "models/state_transport.py:forward",
+          "description": "示例实现：在相邻帧间传递状态；消融运行将该分支关闭。",
+          "code": "use_state_transport = True"
+        }
+      ],
+      "artifacts": [
+        {
+          "label": "训练日志",
+          "path": "runs/exp-001/train.log"
+        },
+        {
+          "label": "评估结果",
+          "path": "runs/exp-001/metrics.json"
+        },
+        {
+          "label": "生成样例",
+          "path": "runs/exp-001/samples/"
+        }
+      ],
+      "performance": {
+        "GPU": "1 × 示例 GPU",
+        "显存": "36.8 / 48 GB",
+        "吞吐": "1.18 samples/s",
+        "micro-batch": 4,
+        "梯度累积": 2,
+        "全局 batch": 8,
+        "实验并发": 1
+      },
+      "comment": "统一设置下的对比基准。",
+      "basis": "measured",
+      "started_at": "2026-10-28T09:00:00+08:00",
+      "updated_at": "2026-10-28T14:20:00+08:00",
+      "analysis_at": "2026-10-28T14:30:00+08:00"
+    },
+    {
+      "id": "exp-002",
+      "name": "时序约束 · 0.1",
+      "changes": "时序损失权重设为 0.1",
+      "status": "completed",
+      "progress": {
+        "step": 10000,
+        "total": 10000
+      },
+      "metrics": {
+        "consistency": 0.824,
+        "quality": 72.1
+      },
+      "history": [
+        {
+          "step": 0,
+          "consistency": 0.685
+        },
+        {
+          "step": 2000,
+          "consistency": 0.746
+        },
+        {
+          "step": 4000,
+          "consistency": 0.785
+        },
+        {
+          "step": 6000,
+          "consistency": 0.806
+        },
+        {
+          "step": 8000,
+          "consistency": 0.818
+        },
+        {
+          "step": 10000,
+          "consistency": 0.824
+        }
+      ],
+      "config": {
+        "model": "demo-video-small",
+        "dataset": "示例验证集 / 64 条视频",
+        "frames": 16,
+        "resolution": "256 × 256",
+        "seed": 42,
+        "steps": 10000,
+        "micro_batch": 4,
+        "gradient_accumulation": 2,
+        "world_size": 1,
+        "global_batch": 8,
+        "learning_rate": 0.0001,
+        "temporal_weight": 0.1,
+        "state_transport": true
+      },
+      "command": "python train.py --config configs/exp-002.yaml --output runs/exp-002",
+      "implementation": [
+        {
+          "file": "training/losses.py:temporal_loss",
+          "description": "示例实现：在基础扩散损失中加入相邻帧时序一致性项。",
+          "code": "loss = diffusion_loss + 0.1 * temporal_loss"
+        },
+        {
+          "file": "models/state_transport.py:forward",
+          "description": "示例实现：在相邻帧间传递状态；消融运行将该分支关闭。",
+          "code": "use_state_transport = True"
+        }
+      ],
+      "artifacts": [
+        {
+          "label": "训练日志",
+          "path": "runs/exp-002/train.log"
+        },
+        {
+          "label": "评估结果",
+          "path": "runs/exp-002/metrics.json"
+        },
+        {
+          "label": "生成样例",
+          "path": "runs/exp-002/samples/"
+        }
+      ],
+      "performance": {
+        "GPU": "1 × 示例 GPU",
+        "显存": "36.8 / 48 GB",
+        "吞吐": "1.12 samples/s",
+        "micro-batch": 4,
+        "梯度累积": 2,
+        "全局 batch": 8,
+        "实验并发": 1
+      },
+      "comment": "一致性提升，质量基本持平。",
+      "basis": "measured",
+      "started_at": "2026-10-28T09:00:00+08:00",
+      "updated_at": "2026-10-28T14:20:00+08:00",
+      "analysis_at": "2026-10-28T14:30:00+08:00"
+    },
+    {
+      "id": "exp-003",
+      "name": "时序约束 · 0.2",
+      "changes": "时序损失权重设为 0.2",
+      "status": "running",
+      "progress": {
+        "step": 6400,
+        "total": 10000
+      },
+      "metrics": {
+        "consistency": 0.839,
+        "quality": 71.2
+      },
+      "history": [
+        {
+          "step": 0,
+          "consistency": 0.684
+        },
+        {
+          "step": 2000,
+          "consistency": 0.761
+        },
+        {
+          "step": 4000,
+          "consistency": 0.813
+        },
+        {
+          "step": 6000,
+          "consistency": 0.837
+        },
+        {
+          "step": 6400,
+          "consistency": 0.839
+        }
+      ],
+      "config": {
+        "model": "demo-video-small",
+        "dataset": "示例验证集 / 64 条视频",
+        "frames": 16,
+        "resolution": "256 × 256",
+        "seed": 42,
+        "steps": 10000,
+        "micro_batch": 4,
+        "gradient_accumulation": 2,
+        "world_size": 1,
+        "global_batch": 8,
+        "learning_rate": 0.0001,
+        "temporal_weight": 0.2,
+        "state_transport": true
+      },
+      "command": "python train.py --config configs/exp-003.yaml --output runs/exp-003",
+      "implementation": [
+        {
+          "file": "training/losses.py:temporal_loss",
+          "description": "示例实现：在基础扩散损失中加入相邻帧时序一致性项。",
+          "code": "loss = diffusion_loss + 0.2 * temporal_loss"
+        },
+        {
+          "file": "models/state_transport.py:forward",
+          "description": "示例实现：在相邻帧间传递状态；消融运行将该分支关闭。",
+          "code": "use_state_transport = True"
+        }
+      ],
+      "artifacts": [
+        {
+          "label": "训练日志",
+          "path": "runs/exp-003/train.log"
+        },
+        {
+          "label": "评估结果",
+          "path": "runs/exp-003/metrics.json"
+        },
+        {
+          "label": "生成样例",
+          "path": "runs/exp-003/samples/"
+        }
+      ],
+      "performance": {
+        "GPU": "1 × 示例 GPU",
+        "显存": "36.8 / 48 GB",
+        "吞吐": "1.10 samples/s",
+        "micro-batch": 4,
+        "梯度累积": 2,
+        "全局 batch": 8,
+        "实验并发": 1
+      },
+      "comment": "当前一致性较高，等待最终评估。",
+      "basis": "measured",
+      "started_at": "2026-10-28T09:00:00+08:00",
+      "updated_at": "2026-10-28T14:42:00+08:00",
+      "analysis_at": "2026-10-28T14:30:00+08:00"
+    },
+    {
+      "id": "exp-004",
+      "name": "状态传递消融",
+      "changes": "权重 0.1 · 关闭状态传递",
+      "status": "planned",
+      "progress": {
+        "step": 0,
+        "total": 10000
+      },
+      "metrics": {},
+      "history": [],
+      "config": {
+        "model": "demo-video-small",
+        "dataset": "示例验证集 / 64 条视频",
+        "frames": 16,
+        "resolution": "256 × 256",
+        "seed": 42,
+        "steps": 10000,
+        "micro_batch": 4,
+        "gradient_accumulation": 2,
+        "world_size": 1,
+        "global_batch": 8,
+        "learning_rate": 0.0001,
+        "temporal_weight": 0.1,
+        "state_transport": false
+      },
+      "command": "python train.py --config configs/exp-004.yaml --output runs/exp-004",
+      "implementation": [
+        {
+          "file": "training/losses.py:temporal_loss",
+          "description": "示例实现：在基础扩散损失中加入相邻帧时序一致性项。",
+          "code": "loss = diffusion_loss + 0.1 * temporal_loss"
+        },
+        {
+          "file": "models/state_transport.py:forward",
+          "description": "示例实现：在相邻帧间传递状态；消融运行将该分支关闭。",
+          "code": "use_state_transport = False"
+        }
+      ],
+      "artifacts": [
+        {
+          "label": "训练日志",
+          "path": "runs/exp-004/train.log"
+        },
+        {
+          "label": "评估结果",
+          "path": "runs/exp-004/metrics.json"
+        },
+        {
+          "label": "生成样例",
+          "path": "runs/exp-004/samples/"
+        }
+      ],
+      "performance": {
+        "GPU": "1 × 示例 GPU",
+        "显存": "36.8 / 48 GB",
+        "吞吐": "等待运行",
+        "micro-batch": 4,
+        "梯度累积": 2,
+        "全局 batch": 8,
+        "实验并发": 1
+      },
+      "comment": "定位状态传递带来的增益。",
+      "basis": "pending",
+      "started_at": null,
+      "updated_at": "2026-10-28T14:20:00+08:00",
+      "analysis_at": "2026-10-28T14:30:00+08:00"
+    }
+  ]
+}
