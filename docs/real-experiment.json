@@ -1,0 +1,75 @@
+{
+  "summary": "加入二次项后，验证 MSE 从 0.510251 降至 0.002508；结果来自本次合成数据上的实际训练。",
+  "new_results_marked_conclusion_stale": true,
+  "planned_and_actual_batch_preserved": true,
+  "runs": [
+    {
+      "id": "exp-001",
+      "metrics": {
+        "validation_mse": 0.5102514028549194,
+        "train_mse": 0.513728141784668
+      },
+      "config": {
+        "seed": 42,
+        "degree": 1,
+        "steps": 300,
+        "batch_size": 65536,
+        "validation_size": 32768,
+        "features": 8,
+        "learning_rate": 0.05,
+        "eval_every": 30,
+        "noise_std": 0.05,
+        "concurrent_runs": 2,
+        "device": "mps"
+      },
+      "performance": {
+        "GPU": "Apple M4 / MPS",
+        "张量设备": "mps:0",
+        "模型设备": "mps:0",
+        "训练耗时 (s)": 0.438,
+        "吞吐 (samples/s)": 44886612,
+        "micro-batch": 65536,
+        "梯度累积": 1,
+        "全局 batch": 65536,
+        "实验并发": 2,
+        "GPU 张量内存 (MiB)": 3.38,
+        "GPU 驱动内存 (MiB)": 40.45
+      },
+      "evaluation_ready": true
+    },
+    {
+      "id": "exp-002",
+      "metrics": {
+        "validation_mse": 0.002507583238184452,
+        "train_mse": 0.002479545772075653
+      },
+      "config": {
+        "seed": 42,
+        "degree": 2,
+        "steps": 300,
+        "batch_size": 65536,
+        "validation_size": 32768,
+        "features": 8,
+        "learning_rate": 0.05,
+        "eval_every": 30,
+        "noise_std": 0.05,
+        "concurrent_runs": 2,
+        "device": "mps"
+      },
+      "performance": {
+        "GPU": "Apple M4 / MPS",
+        "张量设备": "mps:0",
+        "模型设备": "mps:0",
+        "训练耗时 (s)": 0.438,
+        "吞吐 (samples/s)": 44872889,
+        "micro-batch": 65536,
+        "梯度累积": 1,
+        "全局 batch": 65536,
+        "实验并发": 2,
+        "GPU 张量内存 (MiB)": 6.38,
+        "GPU 驱动内存 (MiB)": 40.45
+      },
+      "evaluation_ready": true
+    }
+  ]
+}
