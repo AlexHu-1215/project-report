@@ -2,7 +2,7 @@ const root = document.body.dataset.root;
 const pageId = document.body.dataset.stage;
 let data = JSON.parse(document.querySelector('#report-snapshot').textContent);
 const state = {filter: 'all', query: '', expanded: new Set(), sharedOpen: false};
-const labels = {running: '运行中', completed: '已完成', planned: '待运行', failed: '失败'};
+const labels = {running: '运行中', completed: '已完成', planned: '待运行', failed: '失败', cancelled: '已取消', unknown: '待确认'};
 const colors = ['#7c8a9c', '#1a8068', '#6b74cc', '#c38d39'];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icon = (name, size=18) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${{
@@ -32,9 +32,38 @@ const progress = run => run.progress.total ? Math.round(run.progress.step / run.
 const stageRuns = () => data.stages.flatMap(s => s.runs.map(r => ({...r, stage:s})));
 const activeStage = () => data.stages.find(s => s.id === data.project.current_stage);
 const fmt = (value, digits=3) => value == null ? '—' : Number(value).toFixed(digits);
+function comparisonDelta(run, metric, baseline) {
+  if (run?.status === 'completed' && baseline?.status === 'completed' && run.id !== baseline.id
+      && Number.isFinite(run.metrics[metric.key]) && Number.isFinite(baseline.metrics[metric.key])) {
+    return run.metrics[metric.key] - baseline.metrics[metric.key];
+  }
+  return null;
+}
+function age(value) {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return `${seconds} 秒前`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+  return `${Math.floor(seconds / 86400)} 天前`;
+}
+function freshness(run) {
+  return run.sampled_at
+    ? `<small class="sample-age" title="${esc(time(run.sampled_at))}" data-sampled-at="${esc(run.sampled_at)}">采集于 ${age(run.sampled_at)}</small>`
+    : '<small class="sample-age">等待首次采集</small>';
+}
+function updateAges() {
+  document.querySelectorAll('[data-sampled-at]').forEach(element => {
+    element.textContent = `采集于 ${age(element.dataset.sampledAt)}`;
+  });
+}
+function runStatus(run) {
+  const active = ['running','unknown'].includes(run.status);
+  return `${badge(run.status)}${active ? `<div class="table-progress"><div class="progress-track"><span style="width:${progress(run)}%"></span></div><small>${progress(run)}% · ${run.progress.step.toLocaleString()}</small></div>` : ''}
+    ${freshness(run)}${['unknown','failed','cancelled'].includes(run.status) ? `<small class="status-detail">${esc(run.status_detail)}</small>` : ''}`;
+}
 function bestRun(stage) {
   const metric = stage.metrics[0];
-  return stage.runs.filter(r => r.status === 'completed' && r.metrics[metric.key] != null)
+  return stage.runs.filter(r => r.status === 'completed' && Number.isFinite(r.metrics[metric.key]))
     .sort((a,b) => (b.metrics[metric.key] - a.metrics[metric.key]) * (metric.direction === 'up' ? 1 : -1))[0];
 }
 function demoNotice() {
@@ -55,28 +84,31 @@ function frame(content, stage) {
 }
 function home() {
   const runs = stageRuns(), running = runs.filter(r=>r.status==='running');
+  const active = runs.filter(r=>['running','unknown'].includes(r.status)), unknown = runs.filter(r=>r.status==='unknown');
   const complete = runs.filter(r=>r.status==='completed'), stage = activeStage();
   return `<div class="page-heading"><div><p class="eyebrow">RESEARCH WORKSPACE</p><h1>实验总览</h1><p class="subtitle">${esc(data.project.description)}</p></div><span class="date">${date(data.updated_at)}</span></div>
     ${data.stages.some(s=>s.demo) ? demoNotice() : ''}
     <div class="stats-grid">${[
-      ['研究阶段',data.stages.length,'layers','按问题归档'],['实验记录',runs.length,'book','设置与结果集中保存'],['进行中',running.length,'clock','查看当前进度'],['已完成',complete.length,'check','保留最终评估结果']
+      ['研究阶段',data.stages.length,'layers','按问题归档'],['实验记录',runs.length,'book','设置与结果集中保存'],['进行中',running.length,'clock',unknown.length ? `${unknown.length} 项状态待确认` : '查看当前进度'],['已完成',complete.length,'check','保留最终评估结果']
     ].map(([name,value,symbol,hint])=>`<div class="stat"><div class="stat-label">${name}${icon(symbol,18)}</div><strong>${String(value).padStart(2,'0')}</strong><small>${hint}</small></div>`).join('')}</div>
-    ${stage ? `<section class="current-stage"><div class="current-content"><p class="eyebrow">当前阶段 <span>STAGE ${String(data.stages.indexOf(stage)+1).padStart(2,'0')}</span></p><h2>${esc(stage.title)}</h2><p>${esc(stage.question)}</p><div class="current-summary">${icon('check',18)}<span>${esc(stage.summary)}</span></div><a class="primary-button" href="${stageHref(stage)}">打开实验表 ${icon('arrow',17)}</a></div><div class="current-side"><span class="tiny-label">完成进度</span><div class="completion-number">${stage.runs.filter(r=>r.status==='completed').length}<span>/ ${stage.runs.length}</span></div><div class="progress-track large"><span style="width:${stage.runs.length ? stage.runs.filter(r=>r.status==='completed').length/stage.runs.length*100 : 0}%"></span></div><p>${stage.runs.filter(r=>r.status==='running').length} 项实验进行中</p><small>采集更新 ${time(data.updated_at)}</small></div></section>` : `<div class="empty"><h2>开始记录第一轮探索</h2><p>在 Codex 中调用 /report，创建阶段并登记实验。</p></div>`}
-    ${running.length ? `<section><div class="section-heading"><h2><span class="live-dot"></span>正在进行</h2><span>最新进度与评估</span></div><div class="running-list">${running.map(r=>`<a class="running-card" href="${stageHref(r.stage)}?run=${encodeURIComponent(r.id)}"><div><div class="run-name"><code>${esc(r.id)}</code>${badge(r.status,r.stage.demo)}</div><h3>${esc(r.name)}</h3><p>${esc(r.changes)}</p></div><div class="running-progress"><strong>${progress(r)}<span>%</span></strong><div class="progress-track"><span style="width:${progress(r)}%"></span></div><small>${r.progress.step.toLocaleString()} / ${r.progress.total.toLocaleString()} steps</small></div><div class="running-metric"><span>${esc(r.stage.metrics[0].label)} · 当前值</span><strong>${fmt(r.metrics[r.stage.metrics[0].key],r.stage.metrics[0].digits)}</strong><small>${time(r.updated_at)} 更新</small></div>${icon('arrow',20)}</a>`).join('')}</div></section>` : ''}
+    ${stage ? `<section class="current-stage"><div class="current-content"><p class="eyebrow">当前阶段 <span>STAGE ${String(data.stages.indexOf(stage)+1).padStart(2,'0')}</span></p><h2>${esc(stage.title)}</h2><p>${esc(stage.question)}</p><div class="current-summary">${icon('check',18)}<span>${esc(stage.summary)}</span></div><a class="primary-button" href="${stageHref(stage)}">打开实验表 ${icon('arrow',17)}</a></div><div class="current-side"><span class="tiny-label">完成进度</span><div class="completion-number">${stage.runs.filter(r=>r.status==='completed').length}<span>/ ${stage.runs.length}</span></div><div class="progress-track large"><span style="width:${stage.runs.length ? stage.runs.filter(r=>r.status==='completed').length/stage.runs.length*100 : 0}%"></span></div><p>${stage.runs.filter(r=>r.status==='running').length} 项实验进行中</p><small>记录更新 ${time(stage.updated_at)}</small></div></section>` : `<div class="empty"><h2>开始记录第一轮探索</h2><p>在 Codex 中调用 /report，创建阶段并登记实验。</p></div>`}
+    ${active.length ? `<section><div class="section-heading"><h2><span class="live-dot"></span>正在进行与待确认</h2><span>最新进度与评估</span></div><div class="running-list">${active.map(r=>`<a class="running-card" href="${stageHref(r.stage)}?run=${encodeURIComponent(r.id)}"><div><div class="run-name"><code>${esc(r.id)}</code>${badge(r.status,r.stage.demo)}</div>${r.status==='unknown'?`<p class="status-detail">${esc(r.status_detail)}</p>`:''}<h3>${esc(r.name)}</h3><p>${esc(r.changes)}</p></div><div class="running-progress"><strong>${progress(r)}<span>%</span></strong><div class="progress-track"><span style="width:${progress(r)}%"></span></div><small>${r.progress.step.toLocaleString()} / ${r.progress.total.toLocaleString()} steps</small></div><div class="running-metric"><span>${esc(r.stage.metrics[0].label)} · 当前值</span><strong>${fmt(r.metrics[r.stage.metrics[0].key],r.stage.metrics[0].digits)}</strong>${freshness(r)}</div>${icon('arrow',20)}</a>`).join('')}</div></section>` : ''}
     <section><div class="section-heading"><h2>阶段记录</h2><span>每个问题，一份持续更新的记录</span></div><div class="stage-list">${data.stages.map((s,i)=>`<a class="stage-card" href="${stageHref(s)}"><div class="stage-number">${String(i+1).padStart(2,'0')}</div><div><div class="stage-title"><h3>${esc(s.title)}</h3><span class="stage-state">${s.state === 'completed' ? '阶段完成' : '探索中'}</span></div><p>${esc(s.summary)}</p><small>${s.runs.length} 次运行 <span>·</span> ${s.demo ? '示例阶段' : '实验记录'} <span>·</span> 解释更新 ${time(s.analysis_at)}</small></div>${icon('arrow',20)}</a>`).join('')}</div></section>`;
 }
 
 function metricCell(run, metric, baseline) {
   const value = run.metrics[metric.key];
-  if (value == null) return '<span class="muted">—</span>';
-  const delta = value - baseline?.metrics[metric.key];
-  const comparable = run.status === 'completed' && baseline && run.id !== baseline.id;
-  const good = delta * (metric.direction === 'up' ? 1 : -1) > 0;
-  return `<strong class="metric-number ${run.status === 'running' ? 'provisional' : ''}">${fmt(value,metric.digits)}</strong>${comparable ? `<small class="delta ${good ? 'positive' : ''}">${delta >= 0 ? '+' : ''}${fmt(delta,metric.digits)}</small>` : `<small class="metric-caption">${run.status==='running'?'当前值':'最终值'}</small>`}`;
+  if (!Number.isFinite(value)) return '<span class="muted">—</span>';
+  const delta = comparisonDelta(run, metric, baseline);
+  const good = delta !== null && delta * (metric.direction === 'up' ? 1 : -1) > 0;
+  const step = run.metric_steps?.[metric.key];
+  return `<strong class="metric-number ${run.status === 'completed' ? '' : 'provisional'}">${fmt(value,metric.digits)}</strong>
+    ${delta !== null ? `<small class="delta ${good ? 'positive' : ''}">${delta >= 0 ? '+' : ''}${fmt(delta,metric.digits)}</small>` : `<small class="metric-caption">${run.status==='completed'?'最终值':'最近值'}</small>`}
+    ${step != null ? `<small class="metric-step">step ${step.toLocaleString()}</small>` : ''}`;
 }
 function runDetail(run, stage) {
-  return `<tr class="detail-row"><td colspan="${5+stage.metrics.slice(0,2).length}"><div class="run-detail"><div class="detail-toolbar"><span>${icon('file',17)} ${esc(run.id)} · 运行详情</span><small>采集 ${time(run.updated_at)} <span>·</span> 解释 ${time(run.analysis_at)}</small></div>
-    <div class="detail-grid"><section><h4>设置与运行命令</h4><p class="detail-note">${esc(run.changes)}</p><div class="code-label"><span>完整运行配置</span><span>JSON</span></div><pre>${esc(JSON.stringify(run.config,null,2))}</pre><div class="code-label"><span>启动命令${stage.demo ? ' · 示例' : ''}</span><button class="text-button" data-copy="${esc(run.id)}">${icon('copy',14)} 复制</button></div><pre class="command">${esc(run.command)}</pre></section>
+  return `<tr class="detail-row"><td colspan="${5+stage.metrics.slice(0,2).length}"><div class="run-detail"><div class="detail-toolbar"><span>${icon('file',17)} ${esc(run.id)} · 运行详情</span><small>采集 ${time(run.sampled_at)} <span>·</span> 解释 ${time(run.analysis_at)}</small></div>
+    <p class="lifecycle-detail">${esc(run.status_detail || '')}${run.monitor ? ` · ${esc(run.monitor.host)} · PID ${esc(run.monitor.child_pid ?? run.monitor.pid)}` : ''}</p><div class="detail-grid"><section><h4>设置与运行命令</h4><p class="detail-note">${esc(run.changes)}</p><div class="code-label"><span>完整运行配置</span><span>JSON</span></div><pre>${esc(JSON.stringify(run.config,null,2))}</pre><div class="code-label"><span>启动命令${stage.demo ? ' · 示例' : ''}</span><button class="text-button" data-copy="${esc(run.id)}">${icon('copy',14)} 复制</button></div><pre class="command">${esc(run.command)}</pre></section>
     <section><h4>具体实现</h4>${run.implementation.map(item=>`<div class="implementation"><code>${esc(item.file)}</code><p>${esc(item.description)}</p>${item.code ? `<pre>${esc(item.code)}</pre>` : ''}</div>`).join('')}
     <h4 class="detail-subheading">资源与性能${stage.demo ? ' · 示例' : ''}</h4><dl class="performance">${Object.entries(run.performance).map(([k,v])=>`<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('') || '<p class="muted">等待采集</p>'}</dl>
     <h4 class="detail-subheading">产物与日志${stage.demo ? ' · 示例路径' : ''}</h4><ul class="artifact-list">${run.artifacts.map(item=>`<li>${icon('file',14)}<span>${esc(item.label)}<code>${esc(item.path)}</code></span></li>`).join('') || '<li class="muted">等待产物</li>'}</ul></section></div>
@@ -85,10 +117,10 @@ function runDetail(run, stage) {
 function rows(stage) {
   const baseline = stage.runs.find(r=>r.id===stage.baseline), best = bestRun(stage);
   const runs = stage.runs.filter(r=>(state.filter==='all'||r.status===state.filter) && `${r.id} ${r.name} ${r.changes}`.toLowerCase().includes(state.query.toLowerCase()));
-  return runs.map(r=>`<tr data-row-run="${esc(r.id)}" class="experiment-row ${state.expanded.has(r.id)?'expanded':''}"><td><button class="run-toggle" data-run="${esc(r.id)}" aria-expanded="${state.expanded.has(r.id)}"><span class="chevron">${icon('down',15)}</span><span><code>${esc(r.id)}</code><strong>${esc(r.name)}</strong></span></button></td><td><div class="change-text">${esc(r.changes)}</div>${best?.id===r.id && r.id!==stage.baseline ? '<span class="best-label">已完成最佳</span>' : ''}</td><td>${badge(r.status)}${r.status==='running'?`<div class="table-progress"><div class="progress-track"><span style="width:${progress(r)}%"></span></div><small>${progress(r)}% · ${r.progress.step.toLocaleString()}</small></div>`:''}</td>${stage.metrics.slice(0,2).map(m=>`<td class="metric-cell">${metricCell(r,m,baseline)}</td>`).join('')}<td class="comment-cell">${esc(r.comment)}</td><td><button class="icon-button expand-button" data-run="${esc(r.id)}" aria-label="${state.expanded.has(r.id)?'收起':'展开'} ${esc(r.id)} 详情">${icon('down',17)}</button></td></tr>${state.expanded.has(r.id)?runDetail(r,stage):''}`).join('') || '<tr><td colspan="7" class="empty-table">当前筛选条件下暂无实验。</td></tr>';
+  return runs.map(r=>`<tr data-row-run="${esc(r.id)}" class="experiment-row ${state.expanded.has(r.id)?'expanded':''}"><td><button class="run-toggle" data-run="${esc(r.id)}" aria-expanded="${state.expanded.has(r.id)}"><span class="chevron">${icon('down',15)}</span><span><code>${esc(r.id)}</code><strong>${esc(r.name)}</strong></span></button></td><td><div class="change-text">${esc(r.changes)}</div>${best?.id===r.id && r.id!==stage.baseline ? '<span class="best-label">已完成最佳</span>' : ''}</td><td>${runStatus(r)}</td>${stage.metrics.slice(0,2).map(m=>`<td class="metric-cell">${metricCell(r,m,baseline)}</td>`).join('')}<td class="comment-cell">${esc(r.comment)}</td><td><button class="icon-button expand-button" data-run="${esc(r.id)}" aria-label="${state.expanded.has(r.id)?'收起':'展开'} ${esc(r.id)} 详情">${icon('down',17)}</button></td></tr>${state.expanded.has(r.id)?runDetail(r,stage):''}`).join('') || `<tr><td colspan="${5+stage.metrics.slice(0,2).length}" class="empty-table">当前筛选条件下暂无实验。</td></tr>`;
 }
 function table(stage) {
-  return `<section class="experiments"><div class="section-heading"><div><h2>实验对比</h2><p>点击实验行展开设置、命令与实现。</p></div><span>${stage.runs.length} 次运行</span></div><div class="table-shell"><div class="table-toolbar"><div class="filters" role="group" aria-label="实验状态筛选">${[['all','全部'],['running','运行中'],['completed','已完成'],['planned','待运行'],['failed','失败']].filter(([s])=>s==='all'||stage.runs.some(r=>r.status===s)).map(([s,name])=>`<button data-filter="${s}" class="filter ${state.filter===s?'selected':''}">${name}<span>${s==='all'?stage.runs.length:stage.runs.filter(r=>r.status===s).length}</span></button>`).join('')}</div><label class="search">${icon('search',16)}<input id="run-search" type="search" placeholder="搜索实验或设置…" value="${esc(state.query)}" aria-label="搜索实验"></label></div><div class="table-scroll"><table><thead><tr><th>实验</th><th>关键改动</th><th>状态 / 进度</th>${stage.metrics.slice(0,2).map(m=>`<th class="metric-cell">${esc(m.label)} ${m.direction==='up'?'↑':'↓'}</th>`).join('')}<th>当前结论</th><th></th></tr></thead><tbody id="run-rows">${rows(stage)}</tbody></table></div><div class="table-footnote"><span class="footnote-dot"></span>已完成实验展示最终指标与基线差值；运行中实验展示最近评估值。</div></div></section>`;
+  return `<section class="experiments"><div class="section-heading"><div><h2>实验对比</h2><p>点击实验行展开设置、命令与实现。</p></div><span>${stage.runs.length} 次运行</span></div><div class="table-shell"><div class="table-toolbar"><div class="filters" role="group" aria-label="实验状态筛选">${[['all','全部'],['running','运行中'],['completed','已完成'],['planned','待运行'],['failed','失败'],['cancelled','已取消'],['unknown','待确认']].filter(([s])=>s==='all'||stage.runs.some(r=>r.status===s)).map(([s,name])=>`<button data-filter="${s}" class="filter ${state.filter===s?'selected':''}">${name}<span>${s==='all'?stage.runs.length:stage.runs.filter(r=>r.status===s).length}</span></button>`).join('')}</div><label class="search">${icon('search',16)}<input id="run-search" type="search" placeholder="搜索实验或设置…" value="${esc(state.query)}" aria-label="搜索实验"></label></div><div class="table-scroll"><table><thead><tr><th>实验</th><th>关键改动</th><th>状态 / 进度</th>${stage.metrics.slice(0,2).map(m=>`<th class="metric-cell">${esc(m.label)} ${m.direction==='up'?'↑':'↓'}</th>`).join('')}<th>当前结论</th><th></th></tr></thead><tbody id="run-rows">${rows(stage)}</tbody></table></div><div class="table-footnote"><span class="footnote-dot"></span>完成实验与已完成基线比较；每项指标标注实际采样 step。</div></div></section>`;
 }
 
 function chart(stage) {
@@ -111,10 +143,10 @@ function notes(markdown) {
 }
 function stagePage(stage) {
   const best=bestRun(stage), baseline=stage.runs.find(r=>r.id===stage.baseline), metric=stage.metrics[0];
-  const gain=best && baseline && baseline.metrics[metric.key] != null ? best.metrics[metric.key]-baseline.metrics[metric.key] : null;
+  const gain=comparisonDelta(best,metric,baseline);
   return `<div class="page-heading"><div><p class="eyebrow">STAGE ${String(data.stages.indexOf(stage)+1).padStart(2,'0')} <span class="eyebrow-separator">/</span> ${stage.state==='completed'?'COMPLETED':'IN PROGRESS'}</p><h1>${esc(stage.title)}</h1><p class="subtitle">${esc(stage.question)}</p></div></div>
     ${stage.demo?demoNotice():''}
-    <section class="conclusion-card"><div class="conclusion-copy"><p class="eyebrow">当前结论</p><h2>${esc(stage.summary)}</h2><p>解释更新 ${time(stage.analysis_at)} <span>·</span> 采集更新 ${time(stage.updated_at)}</p></div>${best?`<div class="best-metric"><span>已完成最佳 · ${esc(metric.label)}</span><strong>${fmt(best.metrics[metric.key],metric.digits)}</strong>${gain!=null?`<small>${gain>=0?'+':''}${fmt(gain,metric.digits)} <span>相对基线</span></small>`:''}</div>`:''}</section>
+    <section class="conclusion-card"><div class="conclusion-copy"><p class="eyebrow">当前结论</p><h2>${esc(stage.summary)}</h2><p>解释更新 ${time(stage.analysis_at)} <span>·</span> 记录更新 ${time(stage.updated_at)}</p></div>${best?`<div class="best-metric"><span>已完成最佳 · ${esc(metric.label)}</span><strong>${fmt(best.metrics[metric.key],metric.digits)}</strong>${gain!=null?`<small>${gain>=0?'+':''}${fmt(gain,metric.digits)} <span>相对基线</span></small>`:''}</div>`:''}</section>
     <details class="shared-settings" ${state.sharedOpen ? 'open' : ''}><summary>${icon('layers',16)} 共用实验设置 <span>${esc(stage.settings_summary)}</span>${icon('down',15)}</summary><pre>${esc(JSON.stringify(stage.common_config,null,2))}</pre></details>
     ${table(stage)}${chart(stage)}
     <section class="notes-section"><div class="section-heading"><h2>解释与后续</h2><span>${stage.demo?'示例分析':'阶段记录'}</span></div><article class="notes-card">${notes(stage.notes)}</article></section>
@@ -135,6 +167,7 @@ async function refresh() {
   if(JSON.stringify(next)!==JSON.stringify(data)) { data=next; render(); }
   document.querySelector('#sync-text').textContent='每 5 秒更新';
   document.querySelector('.sync').classList.remove('error');
+  updateAges();
 }
 function refreshView() {
   refresh().catch(()=>{document.querySelector('#sync-text').textContent='连接已断开 · 点击重连';document.querySelector('.sync').classList.add('error');});

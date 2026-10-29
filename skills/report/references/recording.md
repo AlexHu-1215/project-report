@@ -1,86 +1,63 @@
-# 数据与采集约定
+# 记录与启动约定
 
-## 文件与更新单位
+## 统一创建入口
 
-```text
-report/
-  index.html                      # 总览快照
-  data/project.json               # 项目名称、当前阶段、时区
-  data/stages/01-topic.json        # 阶段元信息与共用设置
-  data/stages/01-topic.md          # 简短解释与下一步
-  data/runs/01-topic/exp-001.json  # 一次运行的完整记录
-  stages/01-topic/index.html      # 阶段快照
-  assets/                        # 报告使用的图像、视频
-  static/                        # 本地样式与交互
-```
-
-每个运行由一个采集方更新自己的 JSON 文件，多个运行使用不同文件。首页和阶段页读取同一份数据。`serve` 每次请求聚合最新记录，网页每 5 秒刷新数据；`build` 把当前数据写入 HTML，支持直接打开文件浏览。
-
-JSON 记录指标、配置和状态，Markdown 记录解释，HTML 由脚本生成。编辑原始记录后执行 `build`。页面使用相对路径，可随整个 `report/` 文件夹移动。
-
-## 新阶段
-
-在 `data/stages/` 下创建同名 JSON 与 Markdown，并在 `data/project.json` 的 `current_stage` 指定阶段 ID。示例结构：
+Codex 根据实际任务准备一份 JSON 描述。用户在会话中说明实验即可。首次使用写完整阶段信息；后续同组实验用 `"stage": "01-baseline"` 复用该阶段。
 
 ```json
 {
-  "id": "01-baseline",
-  "title": "基线复现",
-  "question": "确认现有方法在统一评估设置下的表现。",
-  "state": "active",
-  "demo": false,
-  "baseline": "exp-001",
-  "summary": "等待首轮评估结果。",
-  "analysis_at": null,
-  "settings_summary": "统一数据、评估步数与随机种子",
-  "common_config": {},
-  "metrics": [
-    {"key": "score", "label": "得分", "direction": "up", "digits": 3},
-    {"key": "loss", "label": "损失", "direction": "down", "digits": 4}
-  ],
-  "media": []
+  "stage": {
+    "id": "01-baseline",
+    "title": "基线复现",
+    "question": "确认现有方法在统一评估设置下的表现。",
+    "settings_summary": "统一验证集与随机种子",
+    "common_config": {"seed": 42},
+    "metrics": [
+      {"key": "score", "label": "得分", "direction": "up", "digits": 3},
+      {"key": "loss", "label": "损失", "direction": "down", "digits": 4}
+    ]
+  },
+  "run": {
+    "name": "基线复现",
+    "changes": "默认配置",
+    "config": {"seed": 42, "steps": 10000, "learning_rate": 0.0001},
+    "total": 10000,
+    "implementation": [
+      {"file": "train.py", "start": 20, "end": 35, "description": "实际训练循环与损失计算"}
+    ],
+    "artifacts": [{"label": "评估结果", "path": "outputs/baseline/metrics.json"}]
+  },
+  "command": ["python", "train.py", "--config", "configs/baseline.json"]
 }
 ```
 
-`state` 使用 `active` 或 `completed`。表格展示前两个指标，曲线使用第一个指标。阶段 ID 和运行 ID 使用简短的英文字母、数字和连字符。
+`config` 使用本次运行实际生效的完整配置，包括默认值与命令行覆盖项。`implementation` 的 `file` 相对项目根目录，`start`、`end` 为从 1 开始且包含端点的行号；入口自动保存代码片段。也可直接提供 `file`、`description`、`code`。命令使用参数数组，按原样执行，工作目录为项目根目录。配置文件与代码在登记后变动时，重新登记对应运行。
 
-Markdown 使用二级标题、段落、短列表、粗体和行内代码。保持简短，例如：
+```sh
+# 一次完成初始化、创建阶段、分配 ID、保存设置与代码、启动进程。
+python3 "$SKILL_DIR/scripts/report.py" run --project "$PROJECT" --spec "$SPEC"
 
-```markdown
-## 发现与解释
-
-当前观察及其证据。推断同时写明仍待验证的原因。
-
-## 下一步
-
-- 下一项具体实验，以及它要回答的问题。
+# 先登记待运行实验，再启动同一行。
+python3 "$SKILL_DIR/scripts/report.py" new --project "$PROJECT" --spec "$SPEC"
+python3 "$SKILL_DIR/scripts/report.py" start --project "$PROJECT" --stage 01-baseline --run exp-001
 ```
 
-图片或视频保存到 `report/assets/`，在 `media` 中填入 `type`（`image` 或 `video`）、相对报告根目录的 `path` 和 `caption`。
+同阶段的运行 ID 自动分配为 `exp-001`、`exp-002` 等。并发登记使用独占创建分配 ID。新阶段默认以 `exp-001` 为基线，可在阶段 JSON 中指定其他运行。阶段 ID 使用简短英文字母、数字和连字符。
 
-## 采集真实进度
+## 采集与进程状态
 
-将 skill 的 `scripts/` 加入实验的 `PYTHONPATH`，或将单文件 `report.py` 放到实验可导入的位置，然后接入已有训练/评估流程：
+启动器将脚本目录加入 `PYTHONPATH`，并设置 `PROJECT_REPORT_RUN`。训练主 rank 使用：
 
 ```python
 from report import Run
 
-record = Run("/path/to/project/report", "01-baseline", "exp-001").create(
-    name="基线复现",
-    changes="默认配置",
-    config=actual_config,
-    command=actual_command,
-    implementation=[{
-        "file": "train.py:train",
-        "description": "使用实际训练入口和实现说明。",
-        "code": "相关的关键实现片段"
-    }],
-    artifacts=[{"label": "训练日志", "path": actual_log_path}],
-    total=total_steps,
-)
-
-# 在已有的进度回调或评估节点调用。
-record.update(step=step, metrics={"score": score, "loss": loss})
+record = Run.from_env()
+# 沿用训练现有的日志间隔记录进度。
+record.update(step=step)
+# 本次实际测得的指标；每个指标保留自己的采样 step 和时间。
+record.update(step=step, metrics={"loss": loss})
+# 异步评估返回较早 checkpoint 的结果时，保留评估所属 step。
+record.update(metrics={"score": score}, metric_step=evaluated_step)
 record.update(performance={
     "GPU": actual_device,
     "显存": actual_memory_usage,
@@ -90,25 +67,54 @@ record.update(performance={
     "全局 batch": global_batch,
     "实验并发": concurrent_runs,
 })
-
-# 正常结束时保存最终评估值。解释由 Codex 依据结果另行填写。
-record.finish(metrics={"score": final_score, "loss": final_loss})
+# 退出前通过 update 保存最终评估值；启动器根据进程退出结果收尾。
+record.update(step=final_step, metrics={"score": final_score, "loss": final_loss})
 ```
 
-恢复已登记的实验时直接使用 `Run(report_dir, stage_id, run_id)` 继续更新。同一设置复跑使用新的运行 ID。记录数据使用有时区的 ISO 8601 时间。
+同一 step 的采样合并该 step 的实测指标；其他 step 的指标各自保存。表格展示每项指标的最新采样步，曲线使用该指标实际出现的采样点。后到达的旧 step 结果保留在历史中，表格继续展示较新 step 的结果。
 
-运行状态为 `planned`、`running`、`completed`、`failed`。结论依据 `basis` 为 `pending`、`measured`、`inferred`。采集到数值时更新为 `measured`，解释的推断性质在文字中明确说明。
+启动器每 5 秒更新一次进程监测心跳，记录主机、PID、退出码与日志。正常退出为 `completed`，异常退出或子进程被终止为 `failed`；向启动器发送 SIGINT/SIGTERM 时转发给整个任务进程组，记录为 `cancelled`。监测心跳超过 30 秒停止更新时，页面显示 `unknown`（待确认），保留真实的最近采集时间。重新读取到有效心跳或最终结果后恢复实际状态。
 
-结束、异常或调度取消后，根据实际返回状态调用 `finish(status="failed", comment=...)` 或更新 JSON。失联时保留最后一次采集时间，由日志或调度系统确认状态。将同一训练进程的生命周期与采集调用放在一起。
+启动命令持续等待实际训练、评估或调度作业完成。长任务把整个启动器放进 tmux 或作业环境；报告网页服务单独运行。远端训练时，数据和启动器一起放在远端项目，通过端口转发打开报告。
 
-## 整理结果
+已有日志采集器可使用 `Run(report_dir, stage_id, run_id)` 更新指标。自行管理生命周期时，由一个明确的进程或调度采集方创建 `status="running"` 的记录，使用 `update()` 和 `finish(status=..., exit_code=..., detail=...)`。此模式以最近采样时间判断失联，`create(stale_after_seconds=300)` 可按实际采样周期调整。数据来自多个 rank 时汇总到主 rank 写入。
 
-在运行记录中编辑 `comment` 和 `analysis_at`，在阶段 JSON 中编辑 `summary`、`analysis_at`，在同名 Markdown 中补充解释。保存运行时的完整配置、命令、关键实现说明与必要代码片段。产物路径和日志路径对应实际输出；页面以文本展示路径，复制到工作环境即可定位。
+## 写入归属与解释
 
-完成后执行：
+```text
+report/
+  index.html                         # 总览快照
+  data/project.json                  # 项目与当前阶段，Codex 维护
+  data/stages/01-baseline.json        # 阶段设置、总结、基线、媒体
+  data/stages/01-baseline.md          # 阶段解释与下一步
+  data/runs/01-baseline/exp-001.json   # 实际设置、代码快照、训练采样
+  data/lifecycle/01-baseline/exp-001.json  # 启动器独立维护状态
+  data/analysis/01-baseline/exp-001.json   # Codex 独立维护解释
+  logs/01-baseline/exp-001.log         # 启动进程的 stdout 与 stderr
+  stages/01-baseline/index.html       # 阶段快照
+  assets/                            # 图像与视频
+  static/                            # 页面资源
+```
+
+采样、状态、解释分别由一个写入方维护，页面聚合展示。训练进程使用 `update()`；启动器负责收尾；Codex 使用以下命令更新解释：
 
 ```sh
+python3 "$SKILL_DIR/scripts/report.py" annotate --project "$PROJECT" \
+  --stage 01-baseline --run exp-001 \
+  --comment "本轮得分提高，下一轮检验随机种子敏感性。" --basis measured
+```
+
+`basis` 使用 `measured`（实测）、`inferred`（推断）、`pending`（待验证）。解释更新时间单独保存。旧版运行记录继续读取；第一次 `annotate` 会建立独立解释文件，后续训练更新保持解释内容。
+
+阶段 JSON 维护 `summary`、`analysis_at`、`state`（`active` 或 `completed`）、`baseline` 和共用设置。阶段 Markdown 支持二级标题、段落、短列表、粗体、行内代码；段落之间留空行。把发现、证据和下一步写成几句话。图片和视频保存在 `report/assets/`，在阶段的 `media` 数组中写 `type`（`image` 或 `video`）、相对报告根目录的 `path` 和 `caption`。
+
+## 查看与保存
+
+```sh
+python3 "$SKILL_DIR/scripts/report.py" serve --project "$PROJECT" --port 8765
 python3 "$SKILL_DIR/scripts/report.py" build --project "$PROJECT"
 ```
 
-演示阶段使用 `demo: true`，页面持续显示示例标记。示例配置、代码和路径用于说明排版与信息结构。
+实时页面每 5 秒读取记录；每行显示最近采集时间。“每 5 秒更新”表示网页刷新频率，指标随实际评估更新。表格展示阶段定义的前两个指标，曲线使用第一个指标。只有实验和基线均完成、对应指标均为有效数值时才计算最终差值。
+
+`new`、启动器结束、`annotate` 会生成离线快照；编辑阶段 JSON 或 Markdown 后运行 `build`。直接打开 HTML 展示快照中的状态与时间。整个 `report/` 可一起移动。示例阶段使用 `demo: true`，持续显示示例标记。

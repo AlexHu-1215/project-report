@@ -11,11 +11,12 @@
 ## 能做什么
 
 - 总览当前阶段、正在运行的实验与最近更新时间。
-- 一次运行对应一行，进度和指标持续更新；复跑保留独立记录。
+- 一次运行对应一行，统一入口自动分配运行 ID、保存配置和关键代码；复跑保留独立记录。
+- 启动器记录进程、日志和退出结果，监测中断时标记为“待确认”。
 - 点击实验行查看完整配置、启动命令、关键实现、资源使用和产物位置。
-- 区分运行中的当前指标与已完成实验的最终指标，并展示基线差值与曲线。
+- 每项指标展示真实采样 step，已完成实验与已完成基线计算差值。
 - 用短篇 Markdown 保存阶段解释与下一步，支持附加图片和视频。
-- 通过实验进程写入数据，本地网页每 5 秒读取最新记录。
+- 采样、进程状态和解释分别保存，本地网页每 5 秒读取最新记录，并展示最近采集时间。
 
 ## 安装与手动启用
 
@@ -59,9 +60,35 @@ python3 skills/report/scripts/report.py build --project .
 
 ## 接入真实实验
 
-每次运行独立保存 JSON 记录。将 `Run.create()`、`Run.update()`、`Run.finish()` 接入已有实验流程，即可记录实际配置、step 和评估指标。后台实验携带采集调用，网页展示已采集的最新数据；Codex 根据结果补充解释。
+在启用 `/report` 的会话中说明本轮实验，Codex 会根据实际设置准备一份实验描述，并调用统一入口：
 
-阶段结构、字段说明和采集示例见[数据与采集约定](skills/report/references/recording.md)。
+```sh
+python3 "$SKILL_DIR/scripts/report.py" run --project "$PROJECT" --spec "$SPEC"
+```
+
+它会初始化项目、创建或复用阶段、分配运行 ID、保存配置与代码片段，然后启动命令并保存输出日志。`new` 可先登记待运行实验，`start` 启动已登记的实验。启动器根据实际退出结果记录完成、失败或取消；心跳中断超过 30 秒时，实时页面标记为“待确认”。长任务把整个启动器放进 tmux 或作业环境。
+
+训练主 rank 将采集接到已有的进度与评估回调：
+
+```python
+from report import Run
+record = Run.from_env()
+record.update(step=step, metrics={"loss": loss})
+record.update(metrics={"score": score}, metric_step=evaluated_step)
+```
+
+训练进程维护采样文件，启动器维护状态文件，Codex 通过 `annotate` 维护独立解释文件。各指标按实际采样步保存，文字解释与训练更新独立。既有运行记录继续读取。
+
+完整实验描述、代码快照、远端运行和采集方式见[记录与启动约定](skills/report/references/recording.md)。
+
+## 开发验证
+
+```sh
+python3 -B -m unittest discover -s tests -v
+node tests/test_ui.cjs
+```
+
+回归用例覆盖真实进程的退出与取消、监测中断、并发登记、采样与解释的独立写入、指标采样步和基线比较。Python 运行脚本使用标准库，前端回归用例使用 Node.js 内置模块。
 
 ## 仓库内容
 
@@ -69,7 +96,7 @@ python3 skills/report/scripts/report.py build --project .
 skills/report/
   SKILL.md                    # Codex 工作流程
   agents/openai.yaml          # 手动启用配置
-  scripts/report.py           # 初始化、采集、生成与本地服务
+  scripts/report.py           # 登记、采集、进程监测、生成与本地服务
   assets/                     # 页面样式、交互、原则和示例数据
   references/recording.md      # 数据结构与实验接入说明
 docs/preview.png              # 页面预览
